@@ -1,9 +1,9 @@
 'use strict';
 const $=s=>document.querySelector(s),P=Puzzle,names=['ポピ','モモ','ラヴィ','ブル'],files=['popi','momo','ravi','buru'];
-let chars=Array.from({length:9},(_,i)=>i<4?{name:names[i],src:`assets/${files[i]}.png`,original:`assets/${files[i]}.png`,crop:{zoom:1,x:0,y:0}}:null),bests={},selected=[0,1,2,3],sound=false,frameTheme='white',duration=60,db=null,storage='local',world=null,pieceElements=new Map(),board=[],path=[],playing=false,busy=false,paused=false,shuffling=false,shuffleReady=false,score=0,remaining=0,last=0,raf=0,epoch=0,activeIds=[],pointer=null,editSlot=0,cropImage=null,cropOriginal='',crop={zoom:1,x:0,y:0},drag=null,toastTimer;
+let chars=Array.from({length:9},(_,i)=>i<4?{name:names[i],src:`assets/${files[i]}.png`,original:`assets/${files[i]}.png`,crop:{zoom:1,x:0,y:0}}:null),bests={},selected=[0,1,2,3],sound=false,sfxVolume=.8,bgmVolume=.35,frameTheme='white',duration=60,db=null,storage='local',world=null,pieceElements=new Map(),board=[],path=[],playing=false,busy=false,paused=false,shuffling=false,shuffleReady=false,score=0,remaining=0,last=0,raf=0,epoch=0,activeIds=[],pointer=null,editSlot=0,cropImage=null,cropOriginal='',crop={zoom:1,x:0,y:0},drag=null,toastTimer;
 function toast(t){$('#toast').textContent=t;$('#toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),3200)}
-function show(id){document.querySelectorAll('.screen').forEach(e=>e.hidden=e.id!==id);document.body.dataset.screen=id;window.scrollTo(0,0)}
-function state(){return {chars,bests,duration,selected,sound,frameTheme,builtinsVersion:P.BUILTINS_VERSION}}
+function show(id){document.querySelectorAll('.screen').forEach(e=>e.hidden=e.id!==id);document.body.dataset.screen=id;window.scrollTo(0,0);requestAnimationFrame(fitBoard)}
+function state(){return {chars,bests,duration,selected,sound,sfxVolume,bgmVolume,frameTheme,builtinsVersion:P.BUILTINS_VERSION}}
 async function save(){try{if(db){await new Promise((resolve,reject)=>{const tx=db.transaction('data','readwrite');tx.objectStore('data').put(state(),'state');tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error)})}else localStorage.setItem('tsunagekko-v1',JSON.stringify(state()));return true}catch(e){toast('保存できませんでした。空き容量やブラウザ設定を確認してください。');return false}}
 async function backupLegacy(data){
  if(db)await new Promise((resolve,reject)=>{const tx=db.transaction('data','readwrite'),store=tx.objectStore('data'),r=store.get('before-v1.1.0');r.onsuccess=()=>{if(!r.result)store.put(data,'before-v1.1.0')};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error)});
@@ -13,7 +13,7 @@ async function backupBeforeIcons(data){
  if(db)await new Promise((resolve,reject)=>{const tx=db.transaction('data','readwrite'),store=tx.objectStore('data'),r=store.get('before-v1.3.0-icons');r.onsuccess=()=>{if(!r.result)store.put(data,'before-v1.3.0-icons')};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error)});
  else if(!localStorage.getItem('tsunagekko-before-v1.3.0-icons'))localStorage.setItem('tsunagekko-before-v1.3.0-icons',JSON.stringify(data));
 }
-async function init(){try{db=await new Promise((resolve,reject)=>{const r=indexedDB.open('tsunagekko-v1',1);r.onupgradeneeded=()=>r.result.createObjectStore('data');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});storage='IndexedDB'}catch(e){db=null}try{let data=db?await new Promise((resolve,reject)=>{const r=db.transaction('data').objectStore('data').get('state');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)}):JSON.parse(localStorage.getItem('tsunagekko-v1')||'null');if(!data&&db){try{data=JSON.parse(localStorage.getItem('tsunagekko-v1')||'null')}catch(e){}}const migrated=P.migrate(data,chars);({chars,selected,bests,duration,sound,frameTheme}=migrated);if(data?.chars?.length===7)await backupLegacy(data);if(data&&data.builtinsVersion!==P.BUILTINS_VERSION){await backupBeforeIcons(data);await save();}}catch(e){toast('保存データを読み込めませんでした。')}renderAll();renderSettings();document.body.dataset.screen='home'}
+async function init(){try{db=await new Promise((resolve,reject)=>{const r=indexedDB.open('tsunagekko-v1',1);r.onupgradeneeded=()=>r.result.createObjectStore('data');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});storage='IndexedDB'}catch(e){db=null}try{let data=db?await new Promise((resolve,reject)=>{const r=db.transaction('data').objectStore('data').get('state');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)}):JSON.parse(localStorage.getItem('tsunagekko-v1')||'null');if(!data&&db){try{data=JSON.parse(localStorage.getItem('tsunagekko-v1')||'null')}catch(e){}}const migrated=P.migrate(data,chars);({chars,selected,bests,duration,sound,frameTheme}=migrated);({sfxVolume,bgmVolume}=RidomonSound.settings(data));if(data?.chars?.length===7)await backupLegacy(data);if(data&&data.builtinsVersion!==P.BUILTINS_VERSION){await backupBeforeIcons(data);await save();}}catch(e){toast('保存データを読み込めませんでした。')}renderAll();renderSettings();document.body.dataset.screen='home';fitBoard()}
 function applySlotStyle(el,slot,c){if(!el||slot<0||slot>8)return;el.dataset.slot=String(slot);el.style.setProperty('--slot-color',P.SLOT_COLORS[slot]);el.style.setProperty('--slot-ring',P.ringWidth(c,slot)+'px');}
 function image(src,alt,slot=-1){const i=document.createElement('img');i.src=src;i.alt=alt;if(slot>=0){i.classList.add('slot-icon');applySlotStyle(i,slot,chars[slot]);}return i}
 function renderAll(){renderSettings();const filled=chars.filter(Boolean);$('#mascots').replaceChildren(...filled.slice(0,4).map(c=>image(c.src,c.name,chars.indexOf(c))));renderTeam();$('#times').replaceChildren(...[30,60,90,120,150,180].map(t=>{const b=document.createElement('button');b.innerHTML=`${t}<span>秒</span>`;b.className=t===duration?'selected':'';b.setAttribute('aria-pressed',t===duration);b.onclick=()=>{duration=t;renderAll();save()};return b}));$('#bestSetup').textContent=`✦ BEST (${duration}秒) ${(bests[duration]||0).toLocaleString()}`;renderSlots()}
@@ -46,13 +46,40 @@ let viewScale=1,previousPoint=null,finger=null,moveCheck=0,audio=null,voices=new
 function renderSettings(){
  for(const id of ['sound','gameSound']){const b=$('#'+id);b.textContent=sound?'♪ 音 ON':'♪ 音 OFF';b.setAttribute('aria-pressed',String(sound));b.setAttribute('aria-label',sound?'音 ON（タップでOFF）':'音 OFF（タップでON）');}
  document.documentElement.style.setProperty('--piece-frame','#ffffff');
+ for(const [id,value] of [['sfxVolume',sfxVolume],['bgmVolume',bgmVolume]]){const el=$('#'+id);el.value=Math.round(value*100);$('#'+id+'Value').textContent=Math.round(value*100)+'%';}
 }
+const mixer=new RidomonSound.Mixer();
+function refreshMixer(){mixer.configure(sound,{sfxVolume,bgmVolume});}
 async function toggleSound(){
- const old=sound;sound=!sound;renderSettings();if(sound)tone(0);else{for(const osc of voices){try{osc.stop()}catch(e){}}voices.clear();}
+ const old=sound;sound=!sound;renderSettings();refreshMixer();if(sound)tone(0);
  $('#sound').disabled=$('#gameSound').disabled=true;
- try{if(!await save()){sound=old;renderSettings();}}finally{$('#sound').disabled=$('#gameSound').disabled=false;}
+ try{if(!await save()){sound=old;renderSettings();refreshMixer();}}finally{$('#sound').disabled=$('#gameSound').disabled=false;}
 }
-function tone(n){if(!sound)return;try{audio??=new(window.AudioContext||window.webkitAudioContext)();audio.resume();for(let i=0;i<(n>=4?3:1);i++){const osc=audio.createOscillator(),gain=audio.createGain(),t=audio.currentTime+i*.065;osc.type='sine';osc.frequency.setValueAtTime(620+i*190+(n>=3?180:0),t);gain.gain.setValueAtTime(.035,t);gain.gain.exponentialRampToValueAtTime(.001,t+.14);osc.connect(gain);gain.connect(audio.destination);voices.add(osc);osc.onended=()=>voices.delete(osc);osc.start(t);osc.stop(t+.15)}}catch(e){}}
+function tone(n){refreshMixer();mixer.tone(n);}
+function openAudio(){renderSettings();$('#audioDialog').showModal();}
+$('#audioSettings').onclick=$('#pauseAudio').onclick=$('#homeAudio').onclick=openAudio;
+$('#closeAudio').onclick=()=>$('#audioDialog').close();
+$('#restartAudio').onclick=()=>{if(!sound){sound=true;renderSettings();save();}refreshMixer();mixer.recover().then(ok=>{if(ok)tone(0);else toast('音の再開には、もう一度タップしてね。');});};
+$('#previewSound').onclick=()=>{if(!sound){sound=true;renderSettings();save();}tone(4);};
+for(const [id,key] of [['sfxVolume','sfxVolume'],['bgmVolume','bgmVolume']]){
+ const input=$('#'+id);let committed;
+ input.onfocus=()=>{committed=key==='sfxVolume'?sfxVolume:bgmVolume;};
+ input.oninput=()=>{const v=Math.max(0,Math.min(1,Number(input.value)/100));if(key==='sfxVolume')sfxVolume=v;else bgmVolume=v;refreshMixer();$('#'+id+'Value').textContent=Math.round(v*100)+'%';};
+ input.onchange=async()=>{if(!await save()){if(key==='sfxVolume')sfxVolume=committed??.8;else bgmVolume=committed??.35;renderSettings();refreshMixer();}else committed=key==='sfxVolume'?sfxVolume:bgmVolume;};
+}
+// Resume/re-unlock from real user input. Never change hardware volume.
+document.addEventListener('pointerdown',()=>{refreshMixer();mixer.unlock();},{passive:true});
+document.addEventListener('click',()=>{refreshMixer();mixer.unlock();},{passive:true});
+function fitBoard(){
+ const zone=$('#boardZone'),el=$('#board');if(!zone||!el||!playing)return;
+ const r=zone.getBoundingClientRect(),w=Math.max(1,Math.min(r.width-8,(r.height-8)*P.WIDTH/P.HEIGHT));
+ el.style.width=w+'px';el.style.height=w*P.HEIGHT/P.WIDTH+'px';if(world)renderBoard();
+}
+if(typeof ResizeObserver!=='undefined')new ResizeObserver(fitBoard).observe($('#boardZone'));
+function updateVisibleViewport(){const v=window.visualViewport;if(v){document.documentElement.style.setProperty('--visible-height',v.height+'px');document.documentElement.style.setProperty('--viewport-top',v.offsetTop+'px');}fitBoard();}
+window.visualViewport?.addEventListener('resize',updateVisibleViewport);
+window.visualViewport?.addEventListener('scroll',updateVisibleViewport);
+updateVisibleViewport();
 function syncPieces(){
  const existing=new Set(world.bodies.map(b=>b.uid));for(const [uid,el]of pieceElements)if(!existing.has(uid)){el.remove();pieceElements.delete(uid)}
  for(const b of world.bodies){let el=pieceElements.get(b.uid);if(!el){el=document.createElement('div');el.className='piece';el.dataset.uid=b.uid;const orb=document.createElement('div');orb.className='orb';const mask=document.createElement('div');mask.className='art-mask';mask.append(image(chars[b.kind].src,chars[b.kind].name,b.kind));orb.append(mask);el.append(orb);$('#pieces').append(el);pieceElements.set(b.uid,el)}else{const im=el.querySelector('img');if(im.alt!==chars[b.kind].name||el.dataset.kind!==String(b.kind)){im.src=chars[b.kind].src;im.alt=chars[b.kind].name}}el.dataset.kind=b.kind;applySlotStyle(el,b.kind,chars[b.kind]);applySlotStyle(el.querySelector('img'),b.kind,chars[b.kind]);}
@@ -112,7 +139,7 @@ async function shuffleGame(){
 $('#shuffle').onclick=shuffleGame;
 function start(){
  selected=P.validSelection(chars,selected);if(selected.length<4||selected.length>7){toast('プレイ用のキャラを4〜7種類選んでね。');return setup();}
- idleSince=performance.now();idleHint=[];pendingClear=Promise.resolve();epoch++;cancelAnimationFrame(raf);activeIds=selected.slice();world=new P.World(activeIds);score=0;remaining=duration;path=[];pointer=null;finger=null;busy=false;paused=false;shuffling=false;shuffleReady=false;playing=true;moveCheck=0;renderShuffleButton();$('#score').textContent='0';$('#gameBest').textContent=`BEST ${(bests[duration]||0).toLocaleString()}`;$('#boardMessage').textContent='';$('#particles').replaceChildren();$('#pieces').replaceChildren();pieceElements.clear();show('game');syncPieces();renderBoard();last=performance.now();updateTime();tone(0);raf=requestAnimationFrame(tick);
+ idleSince=performance.now();idleHint=[];pendingClear=Promise.resolve();epoch++;cancelAnimationFrame(raf);activeIds=selected.slice();world=new P.World(activeIds);score=0;remaining=duration;path=[];pointer=null;finger=null;busy=false;paused=false;shuffling=false;shuffleReady=false;playing=true;moveCheck=0;renderShuffleButton();$('#score').textContent='0';$('#gameBest').textContent=`BEST ${(bests[duration]||0).toLocaleString()}`;$('#boardMessage').textContent='';$('#particles').replaceChildren();$('#pieces').replaceChildren();pieceElements.clear();show('game');syncPieces();fitBoard();renderBoard();last=performance.now();updateTime();tone(0);raf=requestAnimationFrame(tick);
 }
 function updateTime(){$('#timer').textContent=Math.ceil(remaining);$('#timeBar').style.width=`${remaining/duration*100}%`;}
 function tick(t){
@@ -132,4 +159,4 @@ function tick(t){
 }
 function finish(){playing=false;epoch++;busy=false;shuffling=false;shuffleReady=false;clearPath();const record=score>(bests[duration]||0);if(record){bests[duration]=score;save();}$('#record').textContent=record?'✦ NEW BEST！ ハイスコア更新 ✦':'つながるって、たのしいね。';$('#finalScore').textContent=score.toLocaleString();$('#finalBest').textContent=`BEST (${duration}秒) ${(bests[duration]||0).toLocaleString()}`;show('result');renderAll();}
 function pauseGame(){if(!playing||paused)return;if(!shuffling)remaining=Math.max(0,remaining-(performance.now()-last)/1000);last=performance.now();if(!remaining)return finish();paused=true;clearPath();renderShuffleButton();$('#pauseDialog').showModal();}
-$('#pause').onclick=pauseGame;$('#resume').onclick=()=>{$('#pauseDialog').close();paused=false;last=performance.now();renderShuffleButton();};$('#pauseDialog').addEventListener('cancel',e=>e.preventDefault());$('#quit').onclick=()=>{$('#pauseDialog').close();playing=false;shuffling=false;shuffleReady=false;epoch++;cancelAnimationFrame(raf);$('#board').classList.remove('shuffle-out','shuffle-in');show('home');};document.addEventListener('visibilitychange',()=>{if(document.hidden)pauseGame();});$('#start').onclick=$('#again').onclick=start;window.addEventListener('resize',()=>{if(playing)renderBoard();});init();
+$('#pause').onclick=pauseGame;$('#resume').onclick=()=>{$('#pauseDialog').close();paused=false;refreshMixer();mixer.unlock();last=performance.now();renderShuffleButton();};$('#pauseDialog').addEventListener('cancel',e=>e.preventDefault());$('#quit').onclick=()=>{$('#pauseDialog').close();playing=false;shuffling=false;shuffleReady=false;epoch++;cancelAnimationFrame(raf);$('#board').classList.remove('shuffle-out','shuffle-in');show('home');};document.addEventListener('visibilitychange',()=>{if(document.hidden){mixer.stop();pauseGame();}});$('#start').onclick=$('#again').onclick=start;window.addEventListener('resize',()=>{if(playing)renderBoard();});init();
